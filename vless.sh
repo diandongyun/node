@@ -258,7 +258,7 @@ ensure_ssh_port_open() {
 download_transfer_bin() {
     echo -e "${CYAN}${BOLD}${ICON_DOWNLOAD} 下载 transfer 二进制文件...${NC}"
     
-    TRANSFER_URL="https://github.com/diandongyun/vless/releases/download/vless/transfer"
+    TRANSFER_URL="https://github.com/diandongyun/node/releases/download/node/transfer"
     
     if [ -f "$TRANSFER_BIN" ]; then
         echo -e "${GREEN}${ICON_INFO} transfer 二进制文件已存在，跳过下载${NC}\n"
