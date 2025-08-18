@@ -26,8 +26,7 @@
 
 # Hysteria2+UDP+TLS+Obfuscation搭建协议
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/blob/main/hysteria2.sh)
-
+bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/hysteria2.sh)
 ```  
 
 极速连接与低延迟：基于 QUIC over UDP，初次连接快（支持 0-RTT）；
@@ -58,7 +57,7 @@ v2rayN 等传统客户端支持较弱（需 plugin）；
 
  # TUIC+UDP+QUIC+TLS协议
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/blob/main/tuic.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/tuic.sh)
 ```  
 
 0-RTT 握手：支持零延迟连接建立，显著提升首次连接速度
@@ -83,7 +82,7 @@ QUIC 传输层：基于 UDP 构建，避免 TCP 的队头阻塞问题，实现�
 
  # VLESS+Reality+uTLS+Vision+Xray-core协议
 ```
-bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/blob/main/vless.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless.sh)
 ```  
 
 抗识别性极强：Reality 模拟浏览器握手，借助 uTLS 和 Vision，将流量伪装为正常 TLS；
