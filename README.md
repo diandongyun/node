@@ -85,6 +85,11 @@ QUIC 传输层：基于 UDP 构建，避免 TCP 的队头阻塞问题，实现�
 bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless.sh)
 ```  
 
+ # VLESS+Reality+uTLS+Vision+Xray-core但服务器多ip协议
+```
+bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless-plus.sh)
+```  
+
 抗识别性极强：Reality 模拟浏览器握手，借助 uTLS 和 Vision，将流量伪装为正常 TLS；
 
 无需证书：相比传统 TLS，Reality 不依赖于域名/签发证书，部署更灵活；
