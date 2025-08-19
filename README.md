@@ -85,7 +85,7 @@ QUIC 传输层：基于 UDP 构建，避免 TCP 的队头阻塞问题，实现�
 bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless.sh)
 ```  
 
- # VLESS+Reality+uTLS+Vision+Xray-core但服务器多ip协议
+ # VLESS+Reality+uTLS+Vision+Xray-core单服务器多ip协议
 ```
 bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless-plus.sh)
 ```  
