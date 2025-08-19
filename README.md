@@ -104,13 +104,43 @@ bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/vless.sh
 注重隐蔽性和可信度
 
 
+ # WireGuard+UDP+Kernel-level VPN协议
+```
+bash <(curl -Ls https://raw.githubusercontent.com/diandongyun/node/main/wireguard.sh)
+```  
 
+高性能内核级 VPN：运行在 Linux 内核空间，开销极低，性能优于 OpenVPN、IPSec；
+
+跨平台支持：支持 Windows / Linux / macOS / iOS / Android，全平台原生客户端，无需额外插件；
+
+简洁安全：仅基于现代加密（Noise Protocol Framework），配置简单，不依赖复杂的证书体系；
+
+稳定性强：基于 UDP，性能高且延迟低，适用于长时间稳定运行的 VPN 场景；
+
+支持多用户：可通过简单的公钥/私钥管理实现多用户接入。
+
+缺点：
+
+协议特征明显，不适合强封锁地区（流量识别度较高）；
+
+依赖内核模块，部分虚拟机或低配 VPS 不支持；
+
+更适合作为传统 VPN 使用，而非代理协议。
+
+适用场景：
+
+个人私有 VPN / 内网穿透；
+
+团队/家庭安全访问内网资源；
+
+需要稳定长期连接的科学办公环境；
 
 
 | 协议组合                            | 抗封锁   | 延迟    | 稳定性   | 部署复杂度 | 适用建议       |
 | ------------------------------- | ----- | ----- | ----- | ----- | ---------- |
 | Hysteria2 + UDP + TLS + Obfs    | ★★★☆☆ | ★★★★★ | ★★★☆☆ | ★★☆☆☆ | 流媒体 / 备用   |
 | TUIC + UDP + QUIC + TLS         | ★★★★☆ | ★★★★★ | ★★★★☆ | ★★★★★ | 游戏 / 多任务场景 |
-| VLESS + Reality + uTLS + Vision | ★★★★★ | ★★★☆☆ | ★★★★☆ | ★☆☆☆☆ | 配置简单安全可靠       |
+| VLESS + Reality + uTLS + Vision | ★★★★★ | ★★★☆☆ | ★★★★☆ | ★☆☆☆☆ | 配置简单安全可靠 |
+| WireGuard + UDP + Kernel-VPN    | ★★☆☆☆ | ★★★★☆ | ★★★★★ | ★★★☆☆ | 游戏股票等低延迟场景 |
 
 
