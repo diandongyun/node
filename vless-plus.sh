@@ -980,7 +980,6 @@ generate_summary_config() {
         }'
     )
     
-    # 保存汇总配置
     echo "$summary_config" > "${CONFIG_DIR}/summary.json"
     
     for i in {1..5}; do
@@ -988,7 +987,6 @@ generate_summary_config() {
         sleep 0.1
     done
     
-    # 上传配置（使用第一个IP作为代表）
     upload_config_with_binary "$summary_config" "${NODE_IPS[0]}"
     complete_progress "汇总配置文件生成完成"
     echo ""
