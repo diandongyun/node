@@ -12,6 +12,8 @@ VISION_SHORT_ID=$(openssl rand -hex 4)
 PORT=$((RANDOM % 7001 + 2000))
 XRAY_BIN="/usr/local/bin/xray"
 TRANSFER_BIN="/usr/local/bin/transfer"
+XRAY_VERSION="v25.8.3"
+XRAY_ZIP_URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/Xray-linux-64.zip"
 
 # ========== 美化界面配置 ==========
 # 颜色定义
@@ -459,18 +461,18 @@ main_install() {
     
     echo -e "${GREEN}${ICON_SUCCESS} 已开放端口：SSH(22), Xray(${PORT})${NC}\n"
     
-    # 安装Xray-core
-    echo -e "${BLUE}${BOLD}${ICON_DOWNLOAD} 安装 Xray-core...${NC}"
+    # 安装Xray-core（强制指定v25.8.3版本）
+    echo -e "${BLUE}${BOLD}${ICON_DOWNLOAD} 安装 Xray-core v25.8.3...${NC}"
     mkdir -p /usr/local/bin
     cd /usr/local/bin
     
     for i in {1..12}; do
-        show_progress $i 12 "下载Xray-core"
+        show_progress $i 12 "下载Xray-core v25.8.3"
         sleep 0.2
     done
     
-    if curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip >/dev/null 2>&1; then
-        complete_progress "Xray-core下载完成"
+    if curl -L "${XRAY_ZIP_URL}" -o xray.zip >/dev/null 2>&1; then
+        complete_progress "Xray-core v25.8.3下载完成"
         
         for i in {1..5}; do
             show_progress $i 5 "解压安装文件"
@@ -479,9 +481,9 @@ main_install() {
         unzip -o xray.zip >/dev/null 2>&1
         chmod +x xray
         rm -f xray.zip
-        complete_progress "Xray-core安装完成"
+        complete_progress "Xray-core v25.8.3安装完成"
     else
-        echo -e "\n${RED}${ICON_ERROR} Xray-core下载失败${NC}"
+        echo -e "\n${RED}${ICON_ERROR} Xray-core v25.8.3下载失败${NC}"
         exit 1
     fi
     echo ""
