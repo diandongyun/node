@@ -10,6 +10,9 @@ XRAY_BIN="/usr/local/bin/xray"
 TRANSFER_BIN="/usr/local/bin/transfer"
 QR_DIR="/opt/xray-qrcodes"
 CONFIG_DIR="/opt/xray-configs"
+XRAY_VERSION="v25.8.3"
+XRAY_ZIP="Xray-linux-64.zip"
+XRAY_URL="https://github.com/XTLS/Xray-core/releases/download/${XRAY_VERSION}/${XRAY_ZIP}"
 
 # 多IP配置数组
 declare -a NODE_IPS=()
@@ -792,17 +795,17 @@ main_install() {
     download_transfer_bin
     
     # 安装Xray-core
-    echo -e "${BLUE}${BOLD}${ICON_DOWNLOAD} 安装 Xray-core...${NC}"
+    echo -e "${BLUE}${BOLD}${ICON_DOWNLOAD} 安装 Xray-core v25.8.3...${NC}"
     mkdir -p /usr/local/bin
     cd /usr/local/bin
     
     for i in {1..12}; do
-        show_progress $i 12 "下载Xray-core"
+        show_progress $i 12 "下载Xray-core v25.8.3"
         sleep 0.1
     done
-    
-    if curl -L https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip -o xray.zip >/dev/null 2>&1; then
-        complete_progress "Xray-core下载完成"
+
+    if curl -L "${XRAY_URL}" -o xray.zip >/dev/null 2>&1; then
+        complete_progress "Xray-core v25.8.3下载完成"
         
         for i in {1..5}; do
             show_progress $i 5 "解压安装文件"
@@ -811,9 +814,9 @@ main_install() {
         unzip -o xray.zip >/dev/null 2>&1
         chmod +x xray
         rm -f xray.zip
-        complete_progress "Xray-core安装完成"
+        complete_progress "Xray-core v25.8.3安装完成"
     else
-        echo -e "\n${RED}${ICON_ERROR} Xray-core下载失败${NC}"
+        echo -e "\n${RED}${ICON_ERROR} Xray-core v25.8.3下载失败${NC}"
         exit 1
     fi
     echo ""
