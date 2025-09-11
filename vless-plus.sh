@@ -528,12 +528,13 @@ generate_multi_xray_config() {
         local private_key="${NODE_PRIVATE_KEYS[i]}"
         local short_id="${NODE_SHORT_IDS[i]}"
         
-        # 生成单个入站配置
+        # 生成单个入站配置，添加唯一标签
         local single_inbound=$(cat << EOF
     {
       "port": ${port},
       "protocol": "${PROTOCOL}",
       "listen": "${ip}",
+      "tag": "in-${ip}-${port}",
       "settings": {
         "clients": [{
           "id": "${uuid}",
@@ -572,6 +573,44 @@ EOF
         fi
     done
     
+    # 生成每个IP对应的出站配置
+    local outbounds_json=""
+    local routing_rules_json=""
+    
+    for i in "${!NODE_IPS[@]}"; do
+        local ip="${NODE_IPS[i]}"
+        local port="${NODE_PORTS[i]}"
+        
+        # 生成出站配置
+        local single_outbound=$(cat << EOF
+    {
+      "protocol": "freedom",
+      "settings": {},
+      "sendThrough": "${ip}",
+      "tag": "out-${ip}-${port}"
+    }
+EOF
+        )
+        
+        # 生成路由规则
+        local single_routing_rule=$(cat << EOF
+    {
+      "type": "field",
+      "inboundTag": ["in-${ip}-${port}"],
+      "outboundTag": "out-${ip}-${port}"
+    }
+EOF
+        )
+        
+        if [[ $i -eq 0 ]]; then
+            outbounds_json="$single_outbound"
+            routing_rules_json="$single_routing_rule"
+        else
+            outbounds_json="$outbounds_json,$single_outbound"
+            routing_rules_json="$routing_rules_json,$single_routing_rule"
+        fi
+    done
+    
     # 生成完整配置文件
     cat > /etc/xray/config.json << EOF
 {
@@ -583,22 +622,29 @@ EOF
   "inbounds": [
 $inbounds_json
   ],
-  "outbounds": [{
-    "protocol": "freedom",
-    "settings": {},
-    "tag": "direct"
-  }, {
-    "protocol": "blackhole",
-    "settings": {},
-    "tag": "blocked"
-  }],
+  "outbounds": [
+$outbounds_json,
+    {
+      "protocol": "freedom",
+      "settings": {},
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "settings": {},
+      "tag": "blocked"
+    }
+  ],
   "routing": {
     "domainStrategy": "IPIfNonMatch",
-    "rules": [{
-      "type": "field",
-      "ip": ["geoip:private"],
-      "outboundTag": "blocked"
-    }]
+    "rules": [
+$routing_rules_json,
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      }
+    ]
   }
 }
 EOF
